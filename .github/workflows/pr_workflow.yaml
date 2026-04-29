@@ -1,0 +1,12 @@
+name: Push on specific branch
+
+on: 
+  pull_request:
+    branches:
+      - main
+jobs:
+  print-msg:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Say my name
+        run: echo "My name is GitHub Actions"
