@@ -1,4 +1,4 @@
-name: myfirst workflow
+name: Push on specific branch
 
 on: 
   push:
