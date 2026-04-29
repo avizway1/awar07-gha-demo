@@ -1,0 +1,12 @@
+name: Scheduled workflow
+
+on: 
+  schedule:
+    - cron: '0 9 * * mon-fri'
+
+jobs:
+  print-msg:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Say my name
+        run: echo "My name is GitHub Actions"
