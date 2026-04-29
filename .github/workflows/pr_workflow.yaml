@@ -1,4 +1,4 @@
-name: Push on specific branch
+name: PR workflow
 
 on: 
   pull_request:
