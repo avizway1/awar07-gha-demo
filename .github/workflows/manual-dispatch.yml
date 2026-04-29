@@ -1,0 +1,10 @@
+name: Push on specific branch
+
+on: workflow_dispatch
+
+jobs:
+  print-msg:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Say my name
+        run: echo "My name is GitHub Actions"
