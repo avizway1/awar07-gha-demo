@@ -28,11 +28,11 @@ jobs:
               env:
                 CLOUD: Google Cloud
               run: echo "I am running on $CLOUD"
-
+#config variables are defined at the repository level and can be used across all workflows in the repository. They are accessed using the vars context and take precedence over workflow, job, and step level variables.
     print-repo-level-variable:
         runs-on: ubuntu-latest
         steps:
             - name: Print project variable 
               env:
                 CLOUD: Google Cloud
-              run: echo "I am running a project named ${{ vars.PROJECT_ID}}"
+              run: echo "I am running a project named ${{ vars.PROJECT_ID }}"

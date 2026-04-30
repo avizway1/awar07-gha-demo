@@ -1,0 +1,16 @@
+name: context variables example
+
+on: 
+    push:
+        branches:
+        - "*"
+jobs:
+    print-cloud:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Print repo name
+              run: echo "I am on this repo ${{ github.repository }}"
+            - name: Print workflow name
+              run: echo "I am running this workflow ${{ github.workflow }}"
+            - name: Triggered by
+              run: echo "Triggered by ${{ github.actor }}"
