@@ -1,0 +1,17 @@
+name: nodejs marketplace setup
+
+on: 
+    push:
+        branches:
+        - "*"
+
+jobs:
+    node-setup:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+            - uses: actions/setup-node@v6
+              with:
+                node-version: '24'
+            - run: npm install
+            - run: node index.js
