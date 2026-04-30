@@ -1,0 +1,29 @@
+name: Workflow level variables
+
+on: workflow_dispatch
+
+env:
+    CLOUD: AWS Cloud
+
+jobs:
+    print-cloud:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Print cloud variable
+              run: echo "I am running on $CLOUD"
+
+    print-cloud-again:
+        runs-on: ubuntu-latest
+        env:
+            CLOUD: Azure Cloud
+        steps:
+            - name: Print cloud variable again
+              run: echo "I am running on $CLOUD"
+
+    print-cloud-step-level:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Print cloud variable again
+              env:
+                CLOUD: Google Cloud
+              run: echo "I am running on $CLOUD"
