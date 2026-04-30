@@ -1,0 +1,19 @@
+name: Conditional job example
+
+on:
+    push:
+        branches:
+        - "*"
+
+jobs:
+    always-run:
+        runs-on: ubuntu-latest
+        steps:
+        - name: Always run this job
+          run: echo "This job always runs."
+
+    only-on-main:
+        runs-on: ubuntu-latest
+        if: github.ref == 'refs/heads/main'
+        steps:
+            - run: echo "This job only runs on the main branch."
