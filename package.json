@@ -1,0 +1,22 @@
+{
+  "name": "aviz-academy-github-actions-test",
+  "version": "1.0.0",
+  "description": "Simple Node.js project to validate GitHub Actions workflows - Aviz Academy",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node index.js"
+  },
+  "keywords": [
+    "aws",
+    "devops",
+    "github-actions",
+    "ci-cd",
+    "aviz-academy"
+  ],
+  "author": "Avinash Reddy Thipparthi",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
