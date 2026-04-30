@@ -5,13 +5,14 @@ on: workflow_dispatch
 env:
     CLOUD: AWS Cloud
 
+#Picks from workflow level variable    
 jobs:
     print-cloud:
         runs-on: ubuntu-latest
         steps:
             - name: Print cloud variable
               run: echo "I am running on $CLOUD"
-
+#Job level variable overrides workflow level variable
     print-cloud-again:
         runs-on: ubuntu-latest
         env:
@@ -19,7 +20,7 @@ jobs:
         steps:
             - name: Print cloud variable again
               run: echo "I am running on $CLOUD"
-
+#Step level variable overrides job and workflow level variable
     print-cloud-step-level:
         runs-on: ubuntu-latest
         steps:
@@ -27,3 +28,11 @@ jobs:
               env:
                 CLOUD: Google Cloud
               run: echo "I am running on $CLOUD"
+
+    print-repo-level-variable:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Print project variable 
+              env:
+                CLOUD: Google Cloud
+              run: echo "I am running a project named ${{ vars.PROJECT_ID}}"
