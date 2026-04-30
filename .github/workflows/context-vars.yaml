@@ -14,3 +14,7 @@ jobs:
               run: echo "I am running this workflow ${{ github.workflow }}"
             - name: Triggered by
               run: echo "Triggered by ${{ github.actor }}"
+            - name: Using to test the secret variable
+              run: echo "THis access key is used to access AWS environment ${{ secrets.AWS_ACCESS_KEY }}"
+            - name: Using to test the secret variable-2
+              run: echo "THis secret key is used to access AWS environment ${{ secrets.AWS_SECRET_KEY}}"
