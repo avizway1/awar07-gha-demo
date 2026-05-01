@@ -1,0 +1,11 @@
+name: Create S3 Buckets
+
+on:
+  workflow_dispatch:
+  
+jobs:
+  s3-create:
+    runs-on: self-hosted
+    steps:
+      - name: list S3 bucket
+        run: aws s3 ls
