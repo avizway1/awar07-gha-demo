@@ -17,7 +17,7 @@ jobs:
         with:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::655700896650:role/GHA-Role
-      - name: get caller identity2
-        run: |
-          aws sts get-caller-identity
-          aws s3 ls
+      - name: verify the user
+        run: aws sts get-caller-identity
+      - name: list s3 buckets
+        run: aws s3 ls
