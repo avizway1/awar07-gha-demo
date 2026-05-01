@@ -1,0 +1,26 @@
+name: AWS OIDC example
+
+on:
+  workflow_dispatch:
+    inputs:
+      bucket_name:
+        description: 'Enter Name of the bucket you want to create'
+        required: true
+        type: string
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  s3-create:
+    runs-on: ubuntu-latest
+    steps:
+      - name: configure aws credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: ap-south-1
+          role-to-assume: arn:aws:iam::655700896650:role/GHA-Role
+      - name: Create S3 bucket
+        run: |
+          aws s3 mb s3://${{ github.event.inputs.bucket_name }} --region ap-south-1
+          aws s3 ls | grep ${{ github.event.inputs.bucket_name }}
+          aws s3 ls
