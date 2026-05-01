@@ -1,0 +1,23 @@
+name: AWS OIDC example
+
+on:
+  push:
+    branches: main
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  aws-access:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout the code
+        uses: actions/checkout@v6
+      - name: configure aws credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::655700896650:role/GHA-Role
+      - name: get caller identity2
+        run: |
+          aws sts get-caller-identity
+          aws s3 ls
