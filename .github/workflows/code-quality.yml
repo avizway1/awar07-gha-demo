@@ -1,7 +1,7 @@
 name: Code Quality with flake and bandit
 
 on:
-  workflow_dispatch:
+  workflow_call:
 
 jobs:
   validate:
