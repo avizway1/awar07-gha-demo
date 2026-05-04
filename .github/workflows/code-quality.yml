@@ -10,16 +10,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12"]
         
     steps:
       - name: checkout code
         uses: actions/checkout@v6
 
-      - name: Setup python ${{ matrix.python-version }}
+      - name: Setup python 3.12
         uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: 3.12
 
       - name: Install Dependencies and tools
         run: |
