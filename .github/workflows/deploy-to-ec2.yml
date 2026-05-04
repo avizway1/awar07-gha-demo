@@ -1,0 +1,24 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v6
+
+      - name: setup ssh key
+        run: |
+          echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
+          chmod 400 key.pem
+
+      - name: copy SCP files to EC2
+        run: 
+          scp -i key.pem -r * ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/var/www/html/
