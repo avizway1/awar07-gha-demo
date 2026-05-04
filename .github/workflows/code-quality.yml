@@ -1,4 +1,4 @@
-name: Code Quality and Dependency check
+name: Code Quality with flake and bandit
 
 on:
   workflow_dispatch:
