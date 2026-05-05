@@ -1,7 +1,1 @@
-
-AWS_ACCESS_KEY_ID=AKIAZRKWRVOFPOJYGBVD
-AWS_SECRET_ACCESS_KEY=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
-
-API_KEY=sk_test_7836498324bfsdjfb8w3r3b2rf78
-
-SLACK_TOKEN=xoxsskjdfbsiujf38932bfew98ewbewgd89ewfbewgf
+This file is clean now
