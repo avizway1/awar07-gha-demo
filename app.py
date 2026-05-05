@@ -1,35 +1,78 @@
-import sqlite3
-from flask import Flask, request
+# Aviz Academy - Batch 8 | DevSecOps Training
+# Sample Flask app to demonstrate Docker + GitHub Actions CI pipeline
+# "Learn by Doing, Not Just Watching" - avizacademy.com
+
+from flask import Flask, jsonify
+import platform
+import os
+import datetime
 
 app = Flask(__name__)
 
-# VULNERABILITY 1 - B105: Hardcoded Password
-# Risk: Anyone with GitHub access can see your real DB password
-DB_PASSWORD = "super_secret_password_123"
+START_TIME = datetime.datetime.utcnow()
 
 
-@app.route('/login')
-def login():
-    user = request.args.get('user')
-
-    # VULNERABILITY 2 - B608: SQL Injection via f-string
-    # Attack: user = "admin' OR '1'='1" --> dumps ALL users!
-    query = f"SELECT * FROM users WHERE username = '{user}'"
-
-    conn = sqlite3.connect('users.db')
-    cursor = conn.cursor()
-    cursor.execute(query)
-    return "Query executed!"
+def uptime():
+    delta = datetime.datetime.utcnow() - START_TIME
+    hours, remainder = divmod(int(delta.total_seconds()), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours}h {minutes}m {seconds}s"
 
 
-@app.route('/admin')
-def admin():
-    # VULNERABILITY 3 - B104 (triggered below in app.run)
-    # Shown here: host='0.0.0.0' = accepts from ANY IP on network
-    return "Admin panel!"
+@app.route("/")
+def home():
+    return jsonify({
+        "app": "Aviz Academy - GitHub Actions Demo",
+        "batch": "Batch 7 - DevSecOps",
+        "message": "Learn by Doing, Not Just Watching!",
+        "website": "avizacademy.com",
+        "status": "running"
+    })
+
+
+@app.route("/health")
+def health():
+    """Health check endpoint — used by Docker and load balancers"""
+    return jsonify({
+        "status": "healthy",
+        "uptime": uptime(),
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+    }), 200
+
+
+@app.route("/info")
+def info():
+    """System info — great for verifying what's inside the container"""
+    return jsonify({
+        "python_version": platform.python_version(),
+        "os": platform.system(),
+        "hostname": platform.node(),
+        "environment": os.getenv("APP_ENV", "development"),
+        "port": os.getenv("PORT", "5000"),
+        "built_by": "Aviz Academy CI Pipeline"
+    })
+
+
+@app.route("/topics")
+def topics():
+    """What Batch 8 is learning"""
+    return jsonify({
+        "batch": "Batch 7",
+        "track": "DevSecOps",
+        "topics_covered": [
+            "Docker fundamentals",
+            "GitHub Actions CI/CD",
+            "Reusable workflows",
+            "Docker image scanning with Trivy",
+            "Shift-left security",
+            "Kubernetes deployments",
+            "Terraform IaC",
+            "AWS cloud services"
+        ],
+        "current_session": "Docker Build + Scan pipeline"
+    })
 
 
 if __name__ == "__main__":
-    # VULNERABILITY 4 - B201: debug=True exposes interactive Python debugger
-    # VULNERABILITY 3 - B104: host='0.0.0.0' = exposed to entire internet
-    app.run(debug=True, host='0.0.0.0')
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
