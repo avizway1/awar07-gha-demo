@@ -19,7 +19,7 @@ COPY requirements.txt .
 # Install dependencies
 # --no-cache-dir = don't store pip cache inside image (keeps image smaller)
 # --upgrade pip  = avoid pip vulnerability warnings
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN pip install --no-cache-dir pip==24.3.1 && \
     pip install --no-cache-dir --require-hashes -r requirements.txt
 
 # Copy application code
