@@ -10,5 +10,6 @@ jobs:
     secrets: inherit
 
   call-scan:
+    needs: call-build
     uses: ./.github/workflows/image-scanner.yml
     secrets: inherit
