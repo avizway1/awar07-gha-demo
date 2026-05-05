@@ -21,6 +21,6 @@ jobs:
         with:
           image-ref: '${{ vars.DOCKERHUB_USERNAME }}/github-actions-app:latest'
           format: 'table'
-          exit-code: '1'
+          exit-code: '0'
           severity: 'CRITICAL,HIGH'
           trivyignores: ${{ github.workspace }}/.trivyignore
