@@ -27,10 +27,8 @@ jobs:
       image_uri: ${{ steps.set-image-uri.outputs.image_uri }}
 
     steps:
-      # FIX 1: actions/checkout@v6 does NOT exist — latest stable is v4
       - uses: actions/checkout@v4
         
-      # FIX 2: configure-aws-credentials@v6.1.0 does NOT exist — latest stable is v4
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -43,36 +41,51 @@ jobs:
         with:
           mask-password: 'true'
           
-      - name: Set ECR Registry env var
-        run: echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
-
       - name: Build, tag and push to ECR
+        # FIX: Expand the step output of login-ecr using ${{ }} syntax directly
+        # so ECR_REGISTRY is hardcoded into the script — not resolved at runtime
+        # from a shell variable. This guarantees it's available to GITHUB_ENV.
         run: |
-          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY"
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
           SHORT_TAG="v-${IMAGE_TAG::7}"
-          
-          echo "Building Docker image..."
-          docker build -t $IMAGE_URI:$SHORT_TAG .
-          docker tag $IMAGE_URI:$SHORT_TAG $IMAGE_URI:latest
+          FULL_IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_TAG"
+
+          echo "Building Docker image: $FULL_IMAGE_URI"
+          docker build -t $FULL_IMAGE_URI .
+          docker tag $FULL_IMAGE_URI $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
           echo "Pushing to ECR..."
-          docker push $IMAGE_URI:$SHORT_TAG
-          docker push $IMAGE_URI:latest
+          docker push $FULL_IMAGE_URI
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-          # FIX 3: Also write IMAGE_FULL_URI to GITHUB_ENV here so it's 
-          # available to the next step in THIS job (set-image-uri)
-          echo "IMAGE_FULL_URI=$IMAGE_URI:$SHORT_TAG" >> $GITHUB_ENV
-          
+          # Write individual pieces to GITHUB_ENV for the next step
+          echo "ECR_REGISTRY=$ECR_REGISTRY"   >> $GITHUB_ENV
+          echo "SHORT_TAG=$SHORT_TAG"          >> $GITHUB_ENV
+
       - name: Set Image URI as Job output
         id: set-image-uri
-        # FIX 4: The old step recomputed the URI from scratch — if ECR_REGISTRY
-        # was somehow empty, output would be empty too.
-        # Now we just reuse IMAGE_FULL_URI that was already validated by the push step.
+        # FIX: Reconstruct FULL_IMAGE_URI from ECR_REGISTRY + ECR_REPOSITORY + SHORT_TAG
+        # All three are now guaranteed to be set (ECR_REGISTRY and SHORT_TAG via
+        # GITHUB_ENV from the previous step; ECR_REPOSITORY from workflow-level env).
         run: |
-          echo "Image URI to be passed to deploy job: $IMAGE_FULL_URI"
-          echo "image_uri=$IMAGE_FULL_URI" >> $GITHUB_OUTPUT
+          FULL_IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_TAG"
+
+          echo "------- DEBUG -------"
+          echo "ECR_REGISTRY   = $ECR_REGISTRY"
+          echo "ECR_REPOSITORY = $ECR_REPOSITORY"
+          echo "SHORT_TAG      = $SHORT_TAG"
+          echo "FULL_IMAGE_URI = $FULL_IMAGE_URI"
+          echo "---------------------"
+
+          if [ -z "$ECR_REGISTRY" ] || [ -z "$ECR_REPOSITORY" ] || [ -z "$SHORT_TAG" ]; then
+            echo "ERROR: One or more source variables is empty. Cannot build image URI."
+            exit 1
+          fi
+
+          echo "image_uri=$FULL_IMAGE_URI" >> $GITHUB_OUTPUT
+          echo "Job output set: image_uri=$FULL_IMAGE_URI"
         
-  # ──────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────
   deploy-to-ecs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
@@ -82,20 +95,17 @@ jobs:
       IMAGE_FULL_URI: ${{ needs.build-and-push.outputs.image_uri }}
 
     steps:
-      # FIX 5: Same action version fix as above
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
 
-      # FIX 6: Add a guard step — fail fast with a clear message if IMAGE_FULL_URI
-      # is empty instead of letting it silently produce a broken task definition
       - name: Verify Image URI is not empty
         run: |
           echo "Image URI received from build job: $IMAGE_FULL_URI"
           if [ -z "$IMAGE_FULL_URI" ]; then
-            echo "ERROR: IMAGE_FULL_URI is empty! The build job output was not passed correctly."
+            echo "ERROR: IMAGE_FULL_URI is empty. Check the build job set-image-uri step logs."
             exit 1
           fi
           
@@ -149,12 +159,11 @@ jobs:
             --output text)
 
           echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_ENV
-
           echo "New Task Definition ARN: $TASK_DEF_ARN"
 
       - name: Deploy to ECS Service
         run: |
-          echo "Updating ECS Service with new task definition..."
+          echo "Updating ECS Service..."
 
           aws ecs update-service \
             --cluster $ECS_CLUSTER_NAME \
@@ -170,4 +179,4 @@ jobs:
             --cluster $ECS_CLUSTER_NAME \
             --services $ECS_SERVICE_NAME
 
-          echo "✅ Deployment completed successfully."
+          echo "Deployment completed successfully."
