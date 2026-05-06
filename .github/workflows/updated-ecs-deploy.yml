@@ -1,0 +1,124 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GitHub Actions Workflow: Build Docker Image → Push to ECR → Deploy to ECS
+# Aviz Academy | avizacademy.com | @avizway | Batch 8 — AWS with DevSecOps
+# File: .github/workflows/deploy.yml
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Deploy to Amazon ECS
+
+# ── Trigger ───────────────────────────────────────────────────────────────────
+# Runs automatically on every push to the 'main' branch
+on:
+  push:
+    branches:
+      - main
+
+# ── Permissions ───────────────────────────────────────────────────────────────
+# Required for OIDC authentication (no long-lived AWS keys needed!)
+permissions:
+  id-token: write  # Allows GitHub to request an OIDC JWT token from AWS
+  contents: read   # Allows workflow to checkout your repository code
+
+# ── Environment Variables ─────────────────────────────────────────────────────
+# All values are pulled from GitHub Secrets
+# (Repo → Settings → Secrets and Variables → Actions → New Repository Secret)
+#
+# IMAGE_TAG is computed at runtime — unique per commit, NOT a secret
+env:
+  AWS_REGION:         ${{ secrets.AWS_REGION }}
+  AWS_ROLE_ARN:       ${{ secrets.AWS_ROLE_ARN }}
+  AWS_ACCOUNT_ID:     ${{ secrets.AWS_ACCOUNT_ID }}
+  ECR_REPO_NAME:      ${{ secrets.ECR_REPO_NAME }}
+  ECS_CLUSTER_NAME:   ${{ secrets.ECS_CLUSTER_NAME }}
+  ECS_SERVICE_NAME:   ${{ secrets.ECS_SERVICE_NAME }}
+  ECS_TASK_DEF_NAME:  ${{ secrets.ECS_TASK_DEF_NAME }}
+  ECS_CONTAINER_NAME: ${{ secrets.ECS_CONTAINER_NAME }}
+  IMAGE_TAG:          "v-${{ github.sha }}"
+
+# ── Jobs ──────────────────────────────────────────────────────────────────────
+jobs:
+  deploy:
+    name: Build and Deploy to ECS
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ── Step 1: Checkout Code ─────────────────────────────────────────────
+      # Clones your repository onto the GitHub Actions runner
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      # ── Step 2: Authenticate to AWS via OIDC ─────────────────────────────
+      # GitHub sends a signed JWT → AWS validates → issues short-lived creds
+      # No AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY stored anywhere!
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region:     ${{ env.AWS_REGION }}
+
+      # ── Step 3: Login to Amazon ECR ──────────────────────────────────────
+      # Authenticates Docker to your private ECR registry
+      # Output: registry → e.g. 123456789012.dkr.ecr.ap-south-1.amazonaws.com
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ── Step 4: Build, Tag & Push Docker Image to ECR ────────────────────
+      # Builds image from your Dockerfile
+      # Tags it as: REGISTRY/REPO_NAME:IMAGE_TAG
+      # Example:    123456789012.dkr.ecr.ap-south-1.amazonaws.com/my-app:v-abc123
+      # Saves the full image URI as output for Step 6
+      - name: Build, Tag & Push Docker Image to ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          IMAGE_URI="${ECR_REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}"
+
+          echo ">>> Building Docker image..."
+          echo "    Image URI: $IMAGE_URI"
+          docker build -t "$IMAGE_URI" .
+
+          echo ">>> Pushing image to ECR..."
+          docker push "$IMAGE_URI"
+
+          echo ">>> Done! Image pushed successfully."
+          echo "image=${IMAGE_URI}" >> $GITHUB_OUTPUT
+
+      # ── Step 5: Download Current ECS Task Definition ──────────────────────
+      # Fetches the existing Task Definition JSON from AWS so we can
+      # update only the container image, keeping all other settings intact
+      - name: Download Current ECS Task Definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$ECS_TASK_DEF_NAME" \
+            --query taskDefinition \
+            --output json > task-def.json
+
+          echo ">>> Task definition downloaded to task-def.json"
+
+      # ── Step 6: Inject New Image URI into Task Definition ─────────────────
+      # Replaces the container image inside task-def.json with the new image
+      # Matches container by ECS_CONTAINER_NAME
+      # Outputs: path to the updated task definition file
+      - name: Update Task Definition with New Image
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition:  task-def.json
+          container-name:   ${{ env.ECS_CONTAINER_NAME }}
+          image:            ${{ steps.build-image.outputs.image }}
+
+      # ── Step 7: Deploy to Amazon ECS Service ─────────────────────────────
+      # Registers the updated task definition as a new revision in ECS
+      # Updates the ECS Service to use the new revision
+      # Waits until ECS finishes rolling out the new containers before
+      # marking the workflow as success or failure
+      - name: Deploy to Amazon ECS Service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition:            ${{ steps.task-def.outputs.task-definition }}
+          service:                    ${{ env.ECS_SERVICE_NAME }}
+          cluster:                    ${{ env.ECS_CLUSTER_NAME }}
+          wait-for-service-stability: true
