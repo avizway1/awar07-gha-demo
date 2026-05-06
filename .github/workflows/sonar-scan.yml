@@ -16,7 +16,7 @@ jobs:
     steps:
       # Step 1: Checkout your code
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Required by SonarCloud to analyse git history
 
