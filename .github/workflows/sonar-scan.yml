@@ -1,0 +1,46 @@
+name: SonarCloud Code Quality
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  sonarcloud:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout your code (same as Jenkins "checkout" stage)
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required by SonarCloud to analyse git history
+
+      # Step 2: Setup Python
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      # Step 4: Run tests and generate coverage report
+      # (SonarCloud reads this to show code coverage %)
+      - name: Run tests with coverage
+        run: |
+          pytest --cov=. --cov-report=xml --cov-report=term-missing
+        continue-on-error: true  # Don't fail here — let SonarCloud decide
+
+      # Step 5: SonarCloud Scan
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # Auto-provided by GitHub
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}      # Create this in SonarCloud and add as secret
