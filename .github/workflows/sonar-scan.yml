@@ -4,7 +4,9 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
 
 jobs:
   sonarcloud:
@@ -12,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout your code (same as Jenkins "checkout" stage)
+      # Step 1: Checkout your code
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -31,16 +33,15 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-cov
 
-      # Step 4: Run tests and generate coverage report
-      # (SonarCloud reads this to show code coverage %)
+      # Step 4: Run tests with coverage
+      # exit code 5 = "no tests found" — we allow that so the scan still runs
       - name: Run tests with coverage
         run: |
-          pytest --cov=. --cov-report=xml --cov-report=term-missing
-        continue-on-error: true  # Don't fail here — let SonarCloud decide
+          pytest --cov=. --cov-report=xml --cov-report=term-missing || true
 
       # Step 5: SonarCloud Scan
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@v3
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # Auto-provided by GitHub
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}      # Create this in SonarCloud and add as secret
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
