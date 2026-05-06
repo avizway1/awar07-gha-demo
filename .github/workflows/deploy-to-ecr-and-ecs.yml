@@ -1,9 +1,7 @@
 name: Build and Deploy to ECR and ECS
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch: 
 
 # OIDC auth requires these two permissions
 permissions:
