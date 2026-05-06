@@ -3,7 +3,7 @@ name: Build and Push to ECR
 on:
   workflow_dispatch:
 
-# DEBUG MODE: Enables step-debug and shell-debug logs in GitHub Actions
+# Enables detailed debug logs in GitHub Actions UI
 env:
   ACTIONS_STEP_DEBUG: true
   ACTIONS_RUNNER_DEBUG: true
@@ -33,21 +33,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── STEP 0: Dump all secrets-mapped env vars (values masked, but keys visible) ──
-      - name: "[DEBUG] Print all env var keys and check for empty values"
+      # ── Verify all secrets are populated before doing any real work ──
+      - name: "[DEBUG] Check all secrets are set"
         run: |
           echo "=== Checking workflow-level env vars ==="
-          echo "AWS_REGION       = '$AWS_REGION'"
-          echo "AWS_ROLE_ARN     = '$AWS_ROLE_ARN'"
-          echo "AWS_ACCOUNT_ID   = '$AWS_ACCOUNT_ID'"
-          echo "ECR_REPOSITORY   = '$ECR_REPOSITORY'"
-          echo "ECS_CLUSTER_NAME = '$ECS_CLUSTER_NAME'"
-          echo "ECS_SERVICE_NAME = '$ECS_SERVICE_NAME'"
+          echo "AWS_REGION         = '$AWS_REGION'"
+          echo "AWS_ACCOUNT_ID     = '$AWS_ACCOUNT_ID'"
+          echo "ECR_REPOSITORY     = '$ECR_REPOSITORY'"
+          echo "ECS_CLUSTER_NAME   = '$ECS_CLUSTER_NAME'"
+          echo "ECS_SERVICE_NAME   = '$ECS_SERVICE_NAME'"
           echo "ECS_TASK_DEF_NAME  = '$ECS_TASK_DEF_NAME'"
           echo "ECS_CONTAINER_NAME = '$ECS_CONTAINER_NAME'"
           echo "IMAGE_TAG          = '$IMAGE_TAG'"
+          echo "(AWS_ROLE_ARN is masked by GitHub — check separately)"
           echo ""
-          echo "=== Checking for empty secrets (empty = secret name wrong or not set) ==="
           MISSING=0
           [ -z "$AWS_REGION" ]          && echo "MISSING: AWS_REGION"          && MISSING=1
           [ -z "$AWS_ROLE_ARN" ]        && echo "MISSING: AWS_ROLE_ARN"        && MISSING=1
@@ -59,12 +58,12 @@ jobs:
           [ -z "$ECS_CONTAINER_NAME" ]  && echo "MISSING: ECS_CONTAINER_NAME"  && MISSING=1
           if [ "$MISSING" = "1" ]; then
             echo ""
-            echo "One or more secrets are missing/empty."
-            echo "Go to: GitHub Repo → Settings → Secrets and variables → Actions"
-            echo "Verify the secret NAMES match exactly (case-sensitive)."
+            echo "One or more secrets are missing or named incorrectly."
+            echo "Go to: Repo -> Settings -> Secrets and variables -> Actions"
+            echo "Secret names are case-sensitive. Fix the name(s) above and retry."
             exit 1
           fi
-          echo "All secrets are populated."
+          echo "All secrets are populated. Proceeding."
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -78,29 +77,31 @@ jobs:
         with:
           mask-password: 'true'
 
-      # ── STEP: Confirm ECR login output ──
-      - name: "[DEBUG] Confirm ECR registry output from login step"
+      # FIX: Write ECR_REGISTRY to GITHUB_ENV in a dedicated step right after login.
+      # This avoids using ${{ steps.login-ecr.outputs.registry }} inside a run: block
+      # (which causes the "An expression was expected" parse error).
+      # env: on a step safely expands step outputs at the job level before bash runs.
+      - name: "[DEBUG] Save ECR registry to GITHUB_ENV"
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
-          echo "ECR registry from login step output: '$ECR_REGISTRY'"
-          if [ -z "$ECR_REGISTRY" ]; then
-            echo "ERROR: ECR registry is empty — the amazon-ecr-login step did not return a registry."
-            echo "This usually means OIDC auth failed. Check the configure-aws-credentials step above."
+          echo "ECR registry from login step: '$REGISTRY'"
+          if [ -z "$REGISTRY" ]; then
+            echo "ERROR: ECR registry is empty — OIDC auth or ECR login likely failed."
             exit 1
           fi
+          echo "ECR_REGISTRY=$REGISTRY" >> $GITHUB_ENV
 
       - name: Build, tag and push to ECR
         run: |
-          # Use ${{ }} to inline the step output — this is evaluated before bash runs
-          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
           SHORT_TAG="v-${IMAGE_TAG::7}"
           FULL_IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_TAG"
 
           echo "=== Build info ==="
-          echo "ECR_REGISTRY   = $ECR_REGISTRY"
-          echo "ECR_REPOSITORY = $ECR_REPOSITORY"
-          echo "SHORT_TAG      = $SHORT_TAG"
-          echo "FULL_IMAGE_URI = $FULL_IMAGE_URI"
+          echo "ECR_REGISTRY   = '$ECR_REGISTRY'"
+          echo "ECR_REPOSITORY = '$ECR_REPOSITORY'"
+          echo "SHORT_TAG      = '$SHORT_TAG'"
+          echo "FULL_IMAGE_URI = '$FULL_IMAGE_URI'"
 
           docker build -t $FULL_IMAGE_URI .
           docker tag $FULL_IMAGE_URI $ECR_REGISTRY/$ECR_REPOSITORY:latest
@@ -108,33 +109,31 @@ jobs:
           docker push $FULL_IMAGE_URI
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-          # Write to GITHUB_ENV for the next step
-          echo "ECR_REGISTRY=$ECR_REGISTRY"     >> $GITHUB_ENV
-          echo "SHORT_TAG=$SHORT_TAG"            >> $GITHUB_ENV
-          echo "FULL_IMAGE_URI=$FULL_IMAGE_URI"  >> $GITHUB_ENV
+          # Save for next step
+          echo "SHORT_TAG=$SHORT_TAG"           >> $GITHUB_ENV
+          echo "FULL_IMAGE_URI=$FULL_IMAGE_URI" >> $GITHUB_ENV
 
-      # ── STEP: Set job output ──
       - name: Set Image URI as Job output
         id: set-image-uri
         run: |
-          echo "=== Variables available in this step ==="
+          echo "=== Variables in set-image-uri step ==="
           echo "ECR_REGISTRY   = '$ECR_REGISTRY'"
           echo "ECR_REPOSITORY = '$ECR_REPOSITORY'"
           echo "SHORT_TAG      = '$SHORT_TAG'"
           echo "FULL_IMAGE_URI = '$FULL_IMAGE_URI'"
 
-          # Validate each piece
-          if [ -z "$ECR_REGISTRY" ] || [ -z "$ECR_REPOSITORY" ] || [ -z "$SHORT_TAG" ]; then
-            echo "ERROR: Cannot build image URI — one or more source variables is empty."
+          if [ -z "$FULL_IMAGE_URI" ]; then
+            echo "ERROR: FULL_IMAGE_URI is empty — cannot set job output."
             exit 1
           fi
 
-          # Write to GITHUB_OUTPUT
           echo "image_uri=$FULL_IMAGE_URI" >> $GITHUB_OUTPUT
 
           echo ""
-          echo "=== Verifying GITHUB_OUTPUT was written ==="
-          grep "image_uri" $GITHUB_OUTPUT && echo "GITHUB_OUTPUT write: OK" || echo "GITHUB_OUTPUT write: FAILED"
+          echo "=== Verifying GITHUB_OUTPUT ==="
+          grep "image_uri" "$GITHUB_OUTPUT" \
+            && echo "GITHUB_OUTPUT write: OK" \
+            || echo "GITHUB_OUTPUT write: FAILED"
 
   # ─────────────────────────────────────────────────────────────────────────────
   deploy-to-ecs:
@@ -152,15 +151,12 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
 
-      - name: "[DEBUG] Show what Job 1 passed to Job 2"
+      - name: "[DEBUG] Show image URI passed from Job 1"
         run: |
-          echo "needs.build-and-push.outputs.image_uri = '${{ needs.build-and-push.outputs.image_uri }}'"
-          echo "IMAGE_FULL_URI env var                  = '$IMAGE_FULL_URI'"
+          echo "IMAGE_FULL_URI = '$IMAGE_FULL_URI'"
           if [ -z "$IMAGE_FULL_URI" ]; then
-            echo ""
-            echo "IMAGE_FULL_URI is empty in Job 2."
-            echo "This means needs.build-and-push.outputs.image_uri was empty."
-            echo "Go back and check the [set-image-uri] step logs in the build-and-push job."
+            echo "ERROR: IMAGE_FULL_URI is empty in Job 2."
+            echo "Check the set-image-uri step in the build-and-push job for errors."
             exit 1
           fi
 
@@ -183,7 +179,7 @@ jobs:
                if .name == $CONTAINER
                then .image = $IMAGE
                else .
-             end
+               end
              )
              | del(
                .taskDefinitionArn,
