@@ -3,11 +3,11 @@ name: Build and Push to ECR
 on:
   workflow_dispatch:
 
-permissions: 
-  id-token: write
-  contents: read
-
+# DEBUG MODE: Enables step-debug and shell-debug logs in GitHub Actions
 env:
+  ACTIONS_STEP_DEBUG: true
+  ACTIONS_RUNNER_DEBUG: true
+
   AWS_REGION: ${{ secrets.AWS_REGION }}
   AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
@@ -17,7 +17,11 @@ env:
   ECS_TASK_DEF_NAME: ${{ secrets.ECS_TASK_DEF_NAME }}
   ECS_CONTAINER_NAME: ${{ secrets.ECS_CONTAINER_NAME }}
   IMAGE_TAG: ${{ github.sha }}
-  
+
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build-and-push:
     name: Build Docker image & push it to ECR
@@ -28,64 +32,111 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        
+
+      # ── STEP 0: Dump all secrets-mapped env vars (values masked, but keys visible) ──
+      - name: "[DEBUG] Print all env var keys and check for empty values"
+        run: |
+          echo "=== Checking workflow-level env vars ==="
+          echo "AWS_REGION       = '$AWS_REGION'"
+          echo "AWS_ROLE_ARN     = '$AWS_ROLE_ARN'"
+          echo "AWS_ACCOUNT_ID   = '$AWS_ACCOUNT_ID'"
+          echo "ECR_REPOSITORY   = '$ECR_REPOSITORY'"
+          echo "ECS_CLUSTER_NAME = '$ECS_CLUSTER_NAME'"
+          echo "ECS_SERVICE_NAME = '$ECS_SERVICE_NAME'"
+          echo "ECS_TASK_DEF_NAME  = '$ECS_TASK_DEF_NAME'"
+          echo "ECS_CONTAINER_NAME = '$ECS_CONTAINER_NAME'"
+          echo "IMAGE_TAG          = '$IMAGE_TAG'"
+          echo ""
+          echo "=== Checking for empty secrets (empty = secret name wrong or not set) ==="
+          MISSING=0
+          [ -z "$AWS_REGION" ]          && echo "MISSING: AWS_REGION"          && MISSING=1
+          [ -z "$AWS_ROLE_ARN" ]        && echo "MISSING: AWS_ROLE_ARN"        && MISSING=1
+          [ -z "$AWS_ACCOUNT_ID" ]      && echo "MISSING: AWS_ACCOUNT_ID"      && MISSING=1
+          [ -z "$ECR_REPOSITORY" ]      && echo "MISSING: ECR_REPOSITORY"      && MISSING=1
+          [ -z "$ECS_CLUSTER_NAME" ]    && echo "MISSING: ECS_CLUSTER_NAME"    && MISSING=1
+          [ -z "$ECS_SERVICE_NAME" ]    && echo "MISSING: ECS_SERVICE_NAME"    && MISSING=1
+          [ -z "$ECS_TASK_DEF_NAME" ]   && echo "MISSING: ECS_TASK_DEF_NAME"   && MISSING=1
+          [ -z "$ECS_CONTAINER_NAME" ]  && echo "MISSING: ECS_CONTAINER_NAME"  && MISSING=1
+          if [ "$MISSING" = "1" ]; then
+            echo ""
+            echo "One or more secrets are missing/empty."
+            echo "Go to: GitHub Repo → Settings → Secrets and variables → Actions"
+            echo "Verify the secret NAMES match exactly (case-sensitive)."
+            exit 1
+          fi
+          echo "All secrets are populated."
+
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
-          
+
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
         with:
           mask-password: 'true'
-          
-      - name: Build, tag and push to ECR
-        # FIX: Expand the step output of login-ecr using ${{ }} syntax directly
-        # so ECR_REGISTRY is hardcoded into the script — not resolved at runtime
-        # from a shell variable. This guarantees it's available to GITHUB_ENV.
+
+      # ── STEP: Confirm ECR login output ──
+      - name: "[DEBUG] Confirm ECR registry output from login step"
         run: |
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          echo "ECR registry from login step output: '$ECR_REGISTRY'"
+          if [ -z "$ECR_REGISTRY" ]; then
+            echo "ERROR: ECR registry is empty — the amazon-ecr-login step did not return a registry."
+            echo "This usually means OIDC auth failed. Check the configure-aws-credentials step above."
+            exit 1
+          fi
+
+      - name: Build, tag and push to ECR
+        run: |
+          # Use ${{ }} to inline the step output — this is evaluated before bash runs
           ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
           SHORT_TAG="v-${IMAGE_TAG::7}"
           FULL_IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_TAG"
 
-          echo "Building Docker image: $FULL_IMAGE_URI"
-          docker build -t $FULL_IMAGE_URI .
-          docker tag $FULL_IMAGE_URI $ECR_REGISTRY/$ECR_REPOSITORY:latest
-
-          echo "Pushing to ECR..."
-          docker push $FULL_IMAGE_URI
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-
-          # Write individual pieces to GITHUB_ENV for the next step
-          echo "ECR_REGISTRY=$ECR_REGISTRY"   >> $GITHUB_ENV
-          echo "SHORT_TAG=$SHORT_TAG"          >> $GITHUB_ENV
-
-      - name: Set Image URI as Job output
-        id: set-image-uri
-        # FIX: Reconstruct FULL_IMAGE_URI from ECR_REGISTRY + ECR_REPOSITORY + SHORT_TAG
-        # All three are now guaranteed to be set (ECR_REGISTRY and SHORT_TAG via
-        # GITHUB_ENV from the previous step; ECR_REPOSITORY from workflow-level env).
-        run: |
-          FULL_IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_TAG"
-
-          echo "------- DEBUG -------"
+          echo "=== Build info ==="
           echo "ECR_REGISTRY   = $ECR_REGISTRY"
           echo "ECR_REPOSITORY = $ECR_REPOSITORY"
           echo "SHORT_TAG      = $SHORT_TAG"
           echo "FULL_IMAGE_URI = $FULL_IMAGE_URI"
-          echo "---------------------"
 
+          docker build -t $FULL_IMAGE_URI .
+          docker tag $FULL_IMAGE_URI $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+          docker push $FULL_IMAGE_URI
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+          # Write to GITHUB_ENV for the next step
+          echo "ECR_REGISTRY=$ECR_REGISTRY"     >> $GITHUB_ENV
+          echo "SHORT_TAG=$SHORT_TAG"            >> $GITHUB_ENV
+          echo "FULL_IMAGE_URI=$FULL_IMAGE_URI"  >> $GITHUB_ENV
+
+      # ── STEP: Set job output ──
+      - name: Set Image URI as Job output
+        id: set-image-uri
+        run: |
+          echo "=== Variables available in this step ==="
+          echo "ECR_REGISTRY   = '$ECR_REGISTRY'"
+          echo "ECR_REPOSITORY = '$ECR_REPOSITORY'"
+          echo "SHORT_TAG      = '$SHORT_TAG'"
+          echo "FULL_IMAGE_URI = '$FULL_IMAGE_URI'"
+
+          # Validate each piece
           if [ -z "$ECR_REGISTRY" ] || [ -z "$ECR_REPOSITORY" ] || [ -z "$SHORT_TAG" ]; then
-            echo "ERROR: One or more source variables is empty. Cannot build image URI."
+            echo "ERROR: Cannot build image URI — one or more source variables is empty."
             exit 1
           fi
 
+          # Write to GITHUB_OUTPUT
           echo "image_uri=$FULL_IMAGE_URI" >> $GITHUB_OUTPUT
-          echo "Job output set: image_uri=$FULL_IMAGE_URI"
-        
-  # ─────────────────────────────────────────────────────────────
+
+          echo ""
+          echo "=== Verifying GITHUB_OUTPUT was written ==="
+          grep "image_uri" $GITHUB_OUTPUT && echo "GITHUB_OUTPUT write: OK" || echo "GITHUB_OUTPUT write: FAILED"
+
+  # ─────────────────────────────────────────────────────────────────────────────
   deploy-to-ecs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
@@ -101,28 +152,29 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
 
-      - name: Verify Image URI is not empty
+      - name: "[DEBUG] Show what Job 1 passed to Job 2"
         run: |
-          echo "Image URI received from build job: $IMAGE_FULL_URI"
+          echo "needs.build-and-push.outputs.image_uri = '${{ needs.build-and-push.outputs.image_uri }}'"
+          echo "IMAGE_FULL_URI env var                  = '$IMAGE_FULL_URI'"
           if [ -z "$IMAGE_FULL_URI" ]; then
-            echo "ERROR: IMAGE_FULL_URI is empty. Check the build job set-image-uri step logs."
+            echo ""
+            echo "IMAGE_FULL_URI is empty in Job 2."
+            echo "This means needs.build-and-push.outputs.image_uri was empty."
+            echo "Go back and check the [set-image-uri] step logs in the build-and-push job."
             exit 1
           fi
-          
+
       - name: Download Existing Task Definition
         run: |
           aws ecs describe-task-definition \
             --task-definition $ECS_TASK_DEF_NAME \
             --query taskDefinition \
             > task-definition.json
-
-          echo "Current Task Definition:"
           cat task-definition.json
 
       - name: Update Container Image in Task Definition
         run: |
-          echo "Updating ECS Task Definition with new image: $IMAGE_FULL_URI"
-
+          echo "Updating task definition with image: $IMAGE_FULL_URI"
           jq --arg IMAGE "$IMAGE_FULL_URI" \
              --arg CONTAINER "$ECS_CONTAINER_NAME" \
              '
@@ -131,10 +183,9 @@ jobs:
                if .name == $CONTAINER
                then .image = $IMAGE
                else .
-               end
+             end
              )
-             |
-             del(
+             | del(
                .taskDefinitionArn,
                .revision,
                .status,
@@ -144,27 +195,20 @@ jobs:
                .registeredBy
              )
              ' task-definition.json > new-task-definition.json
-
           echo "Updated Task Definition:"
           cat new-task-definition.json
 
       - name: Register New ECS Task Definition
-        id: register-task-def
         run: |
-          echo "Registering new task definition revision..."
-
           TASK_DEF_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://new-task-definition.json \
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)
-
           echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_ENV
-          echo "New Task Definition ARN: $TASK_DEF_ARN"
+          echo "Registered: $TASK_DEF_ARN"
 
       - name: Deploy to ECS Service
         run: |
-          echo "Updating ECS Service..."
-
           aws ecs update-service \
             --cluster $ECS_CLUSTER_NAME \
             --service $ECS_SERVICE_NAME \
@@ -173,10 +217,7 @@ jobs:
 
       - name: Wait for ECS Service Stability
         run: |
-          echo "Waiting for ECS service deployment to stabilize..."
-
           aws ecs wait services-stable \
             --cluster $ECS_CLUSTER_NAME \
             --services $ECS_SERVICE_NAME
-
           echo "Deployment completed successfully."
