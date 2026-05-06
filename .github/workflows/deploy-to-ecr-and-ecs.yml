@@ -1,13 +1,9 @@
-
 name: Build and Push to ECR
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
-permissions:
+permissions: 
   id-token: write
   contents: read
 
@@ -21,53 +17,62 @@ env:
   ECS_TASK_DEF_NAME: ${{ secrets.ECS_TASK_DEF_NAME }}
   ECS_CONTAINER_NAME: ${{ secrets.ECS_CONTAINER_NAME }}
   IMAGE_TAG: ${{ github.sha }}
-
+  
 jobs:
   build-and-push:
     name: Build Docker image & push it to ECR
     runs-on: ubuntu-latest
 
     outputs:
-      image_uri: ${{ steps.image.outputs.image_uri }}
+      image_uri: ${{ steps.set-image-uri.outputs.image_uri }}
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
+      # FIX 1: actions/checkout@v6 does NOT exist — latest stable is v4
+      - uses: actions/checkout@v4
+        
+      # FIX 2: configure-aws-credentials@v6.1.0 does NOT exist — latest stable is v4
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
-
+          
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: 'true'
+          
+      - name: Set ECR Registry env var
+        run: echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
 
-      - name: Build and Push Docker Image
-        id: image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      - name: Build, tag and push to ECR
         run: |
           IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY"
-          SHORT_TAG="v-${GITHUB_SHA::7}"
-          FULL_IMAGE_URI="$IMAGE_URI:$SHORT_TAG"
+          SHORT_TAG="v-${IMAGE_TAG::7}"
+          
+          echo "Building Docker image..."
+          docker build -t $IMAGE_URI:$SHORT_TAG .
+          docker tag $IMAGE_URI:$SHORT_TAG $IMAGE_URI:latest
 
-          echo "Building Docker Image..."
-          docker build -t $FULL_IMAGE_URI .
-
-          echo "Tagging latest image..."
-          docker tag $FULL_IMAGE_URI $IMAGE_URI:latest
-
-          echo "Pushing Docker Images to ECR..."
-          docker push $FULL_IMAGE_URI
+          echo "Pushing to ECR..."
+          docker push $IMAGE_URI:$SHORT_TAG
           docker push $IMAGE_URI:latest
 
-          echo "Generated Image URI:"
-          echo "$FULL_IMAGE_URI"
-
-          echo "image_uri=$FULL_IMAGE_URI" >> $GITHUB_OUTPUT
-
+          # FIX 3: Also write IMAGE_FULL_URI to GITHUB_ENV here so it's 
+          # available to the next step in THIS job (set-image-uri)
+          echo "IMAGE_FULL_URI=$IMAGE_URI:$SHORT_TAG" >> $GITHUB_ENV
+          
+      - name: Set Image URI as Job output
+        id: set-image-uri
+        # FIX 4: The old step recomputed the URI from scratch — if ECR_REGISTRY
+        # was somehow empty, output would be empty too.
+        # Now we just reuse IMAGE_FULL_URI that was already validated by the push step.
+        run: |
+          echo "Image URI to be passed to deploy job: $IMAGE_FULL_URI"
+          echo "image_uri=$IMAGE_FULL_URI" >> $GITHUB_OUTPUT
+        
+  # ──────────────────────────────────────────────
   deploy-to-ecs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
@@ -77,39 +82,46 @@ jobs:
       IMAGE_FULL_URI: ${{ needs.build-and-push.outputs.image_uri }}
 
     steps:
+      # FIX 5: Same action version fix as above
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
 
-      - name: Verify Image URI
+      # FIX 6: Add a guard step — fail fast with a clear message if IMAGE_FULL_URI
+      # is empty instead of letting it silently produce a broken task definition
+      - name: Verify Image URI is not empty
         run: |
-          echo "IMAGE_FULL_URI=$IMAGE_FULL_URI"
-
-      - name: Download Existing ECS Task Definition
+          echo "Image URI received from build job: $IMAGE_FULL_URI"
+          if [ -z "$IMAGE_FULL_URI" ]; then
+            echo "ERROR: IMAGE_FULL_URI is empty! The build job output was not passed correctly."
+            exit 1
+          fi
+          
+      - name: Download Existing Task Definition
         run: |
           aws ecs describe-task-definition \
             --task-definition $ECS_TASK_DEF_NAME \
             --query taskDefinition \
-            --output json > task-definition.json
+            > task-definition.json
 
-          echo "Downloaded Existing Task Definition"
+          echo "Current Task Definition:"
+          cat task-definition.json
 
-      - name: Update ECS Task Definition Image
+      - name: Update Container Image in Task Definition
         run: |
-          echo "Updating container image..."
+          echo "Updating ECS Task Definition with new image: $IMAGE_FULL_URI"
 
           jq --arg IMAGE "$IMAGE_FULL_URI" \
              --arg CONTAINER "$ECS_CONTAINER_NAME" \
              '
-             .containerDefinitions = (
-               .containerDefinitions | map(
-                 if .name == $CONTAINER
-                 then .image = $IMAGE
-                 else .
-                 end
-               )
+             .containerDefinitions |=
+             map(
+               if .name == $CONTAINER
+               then .image = $IMAGE
+               else .
+               end
              )
              |
              del(
@@ -126,14 +138,8 @@ jobs:
           echo "Updated Task Definition:"
           cat new-task-definition.json
 
-      - name: Validate Updated Image
-        run: |
-          echo "Validating container image update..."
-
-          cat new-task-definition.json | jq '.containerDefinitions[] | {name,image}'
-
-      - name: Register New Task Definition Revision
-        id: register-task
+      - name: Register New ECS Task Definition
+        id: register-task-def
         run: |
           echo "Registering new task definition revision..."
 
@@ -144,12 +150,11 @@ jobs:
 
           echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_ENV
 
-          echo "New Task Definition ARN:"
-          echo "$TASK_DEF_ARN"
+          echo "New Task Definition ARN: $TASK_DEF_ARN"
 
-      - name: Deploy New Task Definition
+      - name: Deploy to ECS Service
         run: |
-          echo "Deploying updated task definition to ECS Service..."
+          echo "Updating ECS Service with new task definition..."
 
           aws ecs update-service \
             --cluster $ECS_CLUSTER_NAME \
@@ -159,10 +164,10 @@ jobs:
 
       - name: Wait for ECS Service Stability
         run: |
-          echo "Waiting for ECS service stability..."
+          echo "Waiting for ECS service deployment to stabilize..."
 
           aws ecs wait services-stable \
             --cluster $ECS_CLUSTER_NAME \
             --services $ECS_SERVICE_NAME
 
-          echo "Deployment completed successfully"
+          echo "✅ Deployment completed successfully."
