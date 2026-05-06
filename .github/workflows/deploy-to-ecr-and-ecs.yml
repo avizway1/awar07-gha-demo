@@ -63,10 +63,14 @@ jobs:
 
           echo "IMAGE_FULL_URI=$IMAGE_URI:$SHORT_TAG" >> $GITHUB_ENV
           
-      # Expose full image URI as a job ouput for the next jobs
       - name: Set Image URI as Job output
         id: set-image-uri
-        run: echo "image_uri=$IMAGE_FULL_URI" >> $GITHUB_OUTPUT
+        run: |
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY"
+          SHORT_TAG="v-${IMAGE_TAG::7}"
+          FULL_IMAGE_URI="$IMAGE_URI:$SHORT_TAG"
+
+          echo "image_uri=$FULL_IMAGE_URI" >> $GITHUB_OUTPUT
         
   # Starting Job 2...      
   deploy-to-ecs:
