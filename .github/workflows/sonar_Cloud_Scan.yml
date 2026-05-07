@@ -39,6 +39,9 @@ jobs:
       # Step 5: SonarCloud Scan
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@v3
+        with:
+          args: >
+            -Dsonar.branch.name=main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   #Github provides automatically
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}     #Generate and store as secret in GHA
