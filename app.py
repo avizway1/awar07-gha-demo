@@ -23,7 +23,7 @@ def uptime():
 def home():
     return jsonify({
         "app": "Aviz Academy - GitHub Actions Demo",
-        "batch": "Batch 7 - DevSecOps",
+        "batch": "Batch 7 GHA Topic - DevSecOps",
         "message": "Learn by Doing, Not Just Watching!",
         "website": "avizacademy.com",
         "status": "running"
@@ -34,7 +34,7 @@ def home():
 def health():
     """Health check endpoint — used by Docker and load balancers"""
     return jsonify({
-        "status": "healthy",
+        "status": "This app is healthy",
         "uptime": uptime(),
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
     }), 200
