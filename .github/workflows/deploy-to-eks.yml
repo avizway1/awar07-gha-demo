@@ -23,7 +23,7 @@ jobs:
           role-session-name: GithubActions-EKS-Deploy
       - name: Update the Kubeconfig for EKS
         run: |
-          aws eks update-kubeconf --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME }}
+          aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME }}
       - name: verify EKS Nodes
         run: |
           kubectl get nodes
