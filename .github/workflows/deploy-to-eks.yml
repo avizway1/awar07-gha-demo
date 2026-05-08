@@ -1,0 +1,42 @@
+name: Deploy to EKS
+
+on:
+  push:
+    branches: main
+  workflow_dispatch: 
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  aws-access:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout the code
+        uses: actions/checkout@v6
+      - name: configure aws credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GithubActions-EKS-Deploy
+      - name: Update the Kubeconfig for EKS
+        run: |
+          aws eks update-kubeconf --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME }}
+      - name: verify EKS Nodes
+        run: |
+          kubectl get nodes
+          echo "Testing kubectl to fetch nodes"
+      - name: Deploy manifest to EKS
+        run: | 
+          kubectl apply -f k8s/ --namespace=${{ secrets.EKS_NAMESPACE }}
+      - name: verify rollouts
+        run: | 
+          kubectl rollout status deployment --namespace=${{ secrets.EKS_NAMESPACE }} --timeout=120s
+      - name: verify pods
+        run: | 
+          kubectl get pods -n ${{ secrets.EKS_NAMESPACE }}
+
+
+        
