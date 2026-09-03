@@ -41,6 +41,11 @@ jobs:
         with:
           mask-password: 'true'
 
+      # Required for cache-to/cache-from type=gha: the runner's default docker
+      # driver cannot export cache, only the docker-container driver can.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push image to ECR
         uses: docker/build-push-action@v6
         with:
